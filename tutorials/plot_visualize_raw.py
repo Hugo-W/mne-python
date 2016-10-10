@@ -11,6 +11,7 @@ import mne
 
 data_path = op.join(mne.datasets.sample.data_path(), 'MEG', 'sample')
 raw = mne.io.read_raw_fif(op.join(data_path, 'sample_audvis_raw.fif'))
+raw.set_eeg_reference()  # set EEG average reference
 events = mne.read_events(op.join(data_path, 'sample_audvis_raw-eve.fif'))
 
 ###############################################################################
@@ -100,7 +101,7 @@ raw.plot()
 raw.plot_psd()
 
 ###############################################################################
-# Plotting channel wise power spectra is just as easy. The layout is inferred
+# Plotting channel-wise power spectra is just as easy. The layout is inferred
 # from the data by default when plotting topo plots. This works for most data,
 # but it is also possible to define the layouts by hand. Here we select a
 # layout with only magnetometer channels and plot it. Then we plot the channel

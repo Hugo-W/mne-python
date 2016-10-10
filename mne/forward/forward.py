@@ -17,7 +17,6 @@ from os import path as op
 import tempfile
 
 from ..externals.six import string_types
-from ..fixes import sparse_block_diag
 from ..io import RawArray, Info
 from ..io.constants import FIFF
 from ..io.open import fiff_open
@@ -95,29 +94,6 @@ class Forward(dict):
         entr += '>'
 
         return entr
-
-
-def prepare_bem_model(bem, sol_fname=None, method='linear'):
-    """Wrapper for the mne_prepare_bem_model command line utility
-
-    Parameters
-    ----------
-    bem : str
-        The name of the file containing the triangulations of the BEM surfaces
-        and the conductivities of the compartments. The standard ending for
-        this file is -bem.fif and it is produced either with the utility
-        mne_surf2bem or the convenience script mne_setup_forward_model.
-    sol_fname : None | str
-        The output file. None (the default) will employ the standard naming
-        scheme. To conform with the standard naming conventions the filename
-        should start with the subject name and end in "-bem-sol.fif".
-    method : 'linear' | 'constant'
-        The BEM approach.
-    """
-    cmd = ['mne_prepare_bem_model', '--bem', bem, '--method', method]
-    if sol_fname is not None:
-        cmd.extend(('--sol', sol_fname))
-    run_subprocess(cmd)
 
 
 def _block_diag(A, n):
@@ -575,7 +551,7 @@ def convert_forward_solution(fwd, surf_ori=False, force_fixed=False,
 
     Parameters
     ----------
-    fwd : dict
+    fwd : Forward
         The forward solution to modify.
     surf_ori : bool, optional (default False)
         Use surface-based source coordinate system? Note that force_fixed=True
@@ -589,7 +565,7 @@ def convert_forward_solution(fwd, surf_ori=False, force_fixed=False,
 
     Returns
     -------
-    fwd : dict
+    fwd : Forward
         The modified forward solution.
     """
     fwd = fwd.copy() if copy else fwd
@@ -619,7 +595,7 @@ def convert_forward_solution(fwd, surf_ori=False, force_fixed=False,
             fwd['source_ori'] = FIFF.FIFFV_MNE_FIXED_ORI
 
             if fwd['sol_grad'] is not None:
-                x = sparse_block_diag([fix_rot] * 3)
+                x = sparse.block_diag([fix_rot] * 3)
                 fwd['sol_grad']['data'] = fwd['_orig_sol_grad'] * x  # dot prod
                 fwd['sol_grad']['ncol'] = 3 * fwd['nsource']
             logger.info('    [done]')
@@ -662,7 +638,7 @@ def convert_forward_solution(fwd, surf_ori=False, force_fixed=False,
         fwd['sol']['data'] = fwd['_orig_sol'] * surf_rot
         fwd['sol']['ncol'] = 3 * fwd['nsource']
         if fwd['sol_grad'] is not None:
-            x = sparse_block_diag([surf_rot] * 3)
+            x = sparse.block_diag([surf_rot] * 3)
             fwd['sol_grad']['data'] = fwd['_orig_sol_grad'] * x  # dot prod
             fwd['sol_grad']['ncol'] = 3 * fwd['nsource']
         logger.info('[done]')
@@ -692,7 +668,7 @@ def write_forward_solution(fname, fwd, overwrite=False, verbose=None):
     fname : str
         File name to save the forward solution to. It should end with -fwd.fif
         or -fwd.fif.gz.
-    fwd : dict
+    fwd : Forward
         Forward solution.
     overwrite : bool
         If True, overwrite destination file (if it exists).
@@ -772,7 +748,7 @@ def write_forward_solution(fname, fwd, overwrite=False, verbose=None):
         inv_rot = _inv_block_diag(fwd['source_nn'].T, 3)
         sol = sol * inv_rot
         if sol_grad is not None:
-            sol_grad = sol_grad * sparse_block_diag([inv_rot] * 3)  # dot prod
+            sol_grad = sol_grad * sparse.block_diag([inv_rot] * 3)  # dot prod
 
     #
     # MEG forward solution
@@ -1128,7 +1104,7 @@ def apply_forward(fwd, stc, info, start=None, stop=None,
 
     Parameters
     ----------
-    fwd : dict
+    fwd : Forward
         Forward operator to use. Has to be fixed-orientation.
     stc : SourceEstimate
         The source estimate from which the sensor space data is computed.
@@ -1188,7 +1164,7 @@ def apply_forward_raw(fwd, stc, info, start=None, stop=None,
 
     Parameters
     ----------
-    fwd : dict
+    fwd : Forward
         Forward operator to use. Has to be fixed-orientation.
     stc : SourceEstimate
         The source estimate from which the sensor space data is computed.
@@ -1238,7 +1214,7 @@ def restrict_forward_to_stc(fwd, stc):
 
     Parameters
     ----------
-    fwd : dict
+    fwd : Forward
         Forward operator.
     stc : SourceEstimate
         Source estimate.
@@ -1285,7 +1261,7 @@ def restrict_forward_to_label(fwd, labels):
 
     Parameters
     ----------
-    fwd : dict
+    fwd : Forward
         Forward operator.
     labels : label object | list
         Label object or list of label objects.
@@ -1430,7 +1406,7 @@ def _do_forward_solution(subject, meas, fname=None, src=None, spacing=None,
 
     Returns
     -------
-    fwd : dict
+    fwd : Forward
         The generated forward solution.
     """
     if not has_mne_c():
@@ -1576,7 +1552,7 @@ def average_forward_solutions(fwds, weights=None):
 
     Parameters
     ----------
-    fwds : list of dict
+    fwds : list of Forward
         Forward solutions to average. Each entry (dict) should be a
         forward solution.
     weights : array | None
@@ -1586,7 +1562,7 @@ def average_forward_solutions(fwds, weights=None):
 
     Returns
     -------
-    fwd : dict
+    fwd : Forward
         The averaged forward solution.
     """
     # check for fwds being a list

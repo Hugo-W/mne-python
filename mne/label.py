@@ -14,9 +14,7 @@ import re
 import numpy as np
 from scipy import linalg, sparse
 
-from .fixes import digitize, in1d
-from .utils import (get_subjects_dir, _check_subject, logger, verbose, warn,
-                    _check_copy_dep)
+from .utils import get_subjects_dir, _check_subject, logger, verbose, warn
 from .source_estimate import (morph_data, SourceEstimate, _center_of_mass,
                               spatial_src_connectivity)
 from .source_space import add_source_space_distances
@@ -361,7 +359,7 @@ class Label(object):
             raise TypeError("Need: Label or BiHemiLabel. Got: %r" % other)
 
         if self.hemi == other.hemi:
-            keep = in1d(self.vertices, other.vertices, True, invert=True)
+            keep = np.in1d(self.vertices, other.vertices, True, invert=True)
         else:
             keep = np.arange(len(self.vertices))
 
@@ -422,7 +420,7 @@ class Label(object):
         elif self.hemi == 'rh':
             hemi_src = src[1]
 
-        if not np.all(in1d(self.vertices, hemi_src['vertno'])):
+        if not np.all(np.in1d(self.vertices, hemi_src['vertno'])):
             msg = "Source space does not contain all of the label's vertices"
             raise ValueError(msg)
 
@@ -436,11 +434,11 @@ class Label(object):
             nearest = hemi_src['nearest']
 
         # find new vertices
-        include = in1d(nearest, self.vertices, False)
+        include = np.in1d(nearest, self.vertices, False)
         vertices = np.nonzero(include)[0]
 
         # values
-        nearest_in_label = digitize(nearest[vertices], self.vertices, True)
+        nearest_in_label = np.digitize(nearest[vertices], self.vertices, True)
         values = self.values[nearest_in_label]
         # pos
         pos = hemi_src['rr'][vertices]
@@ -453,7 +451,7 @@ class Label(object):
 
     @verbose
     def smooth(self, subject=None, smooth=2, grade=None,
-               subjects_dir=None, n_jobs=1, copy=None, verbose=None):
+               subjects_dir=None, n_jobs=1, verbose=None):
         """Smooth the label
 
         Useful for filling in labels made in a
@@ -484,10 +482,6 @@ class Label(object):
             Path to SUBJECTS_DIR if it is not set in the environment.
         n_jobs : int
             Number of jobs to run in parallel
-        copy : bool
-            This parameter has been deprecated and will be removed in 0.14.
-            Use inst.copy() instead.
-            Whether to return a new instance or modify in place.
         verbose : bool, str, int, or None
             If not None, override default verbose level (see mne.verbose).
             Defaults to self.verbose.
@@ -505,11 +499,11 @@ class Label(object):
         """
         subject = _check_subject(self.subject, subject)
         return self.morph(subject, subject, smooth, grade, subjects_dir,
-                          n_jobs, copy=copy)
+                          n_jobs)
 
     @verbose
     def morph(self, subject_from=None, subject_to=None, smooth=5, grade=None,
-              subjects_dir=None, n_jobs=1, copy=None, verbose=None):
+              subjects_dir=None, n_jobs=1, verbose=None):
         """Morph the label
 
         Useful for transforming a label from one subject to another.
@@ -540,10 +534,6 @@ class Label(object):
             Path to SUBJECTS_DIR if it is not set in the environment.
         n_jobs : int
             Number of jobs to run in parallel.
-        copy : bool
-            This parameter has been deprecated and will be removed in 0.14.
-            Use inst.copy() instead.
-            Whether to return a new instance or modify in place.
         verbose : bool, str, int, or None
             If not None, override default verbose level (see mne.verbose).
 
@@ -583,15 +573,14 @@ class Label(object):
                          smooth=smooth, subjects_dir=subjects_dir,
                          warn=False, n_jobs=n_jobs)
         inds = np.nonzero(stc.data)[0]
-        label = _check_copy_dep(self, copy)
-        label.values = stc.data[inds, :].ravel()
-        label.pos = np.zeros((len(inds), 3))
-        if label.hemi == 'lh':
-            label.vertices = stc.vertices[0][inds]
+        self.values = stc.data[inds, :].ravel()
+        self.pos = np.zeros((len(inds), 3))
+        if self.hemi == 'lh':
+            self.vertices = stc.vertices[0][inds]
         else:
-            label.vertices = stc.vertices[1][inds]
-        label.subject = subject_to
-        return label
+            self.vertices = stc.vertices[1][inds]
+        self.subject = subject_to
+        return self
 
     def split(self, parts=2, subject=None, subjects_dir=None,
               freesurfer=False):
@@ -658,7 +647,7 @@ class Label(object):
         if vertices is None:
             vertices = np.arange(10242)
 
-        label_verts = vertices[in1d(vertices, self.vertices)]
+        label_verts = vertices[np.in1d(vertices, self.vertices)]
         return label_verts
 
     def get_tris(self, tris, vertices=None):
@@ -679,7 +668,7 @@ class Label(object):
             The subset of tris used by the label
         """
         vertices_ = self.get_vertices_used(vertices)
-        selection = np.all(in1d(tris, vertices_).reshape(tris.shape),
+        selection = np.all(np.in1d(tris, vertices_).reshape(tris.shape),
                            axis=1)
         label_tris = tris[selection]
         if len(np.unique(label_tris)) < len(vertices_):
@@ -708,13 +697,14 @@ class Label(object):
         Parameters
         ----------
         subject : string | None
-            The subject the stc is defined for.
+            The subject the label is defined for.
         restrict_vertices : bool | array of int | instance of SourceSpaces
-            If True, returned vertex will be one from stc. Otherwise, it could
-            be any vertex from surf. If an array of int, the returned vertex
-            will come from that array. If instance of SourceSpaces (as of
-            0.13), the returned vertex will be from the given source space.
-            For most accuruate estimates, do not restrict vertices.
+            If True, returned vertex will be one from the label. Otherwise,
+            it could be any vertex from surf. If an array of int, the
+            returned vertex will come from that array. If instance of
+            SourceSpaces (as of 0.13), the returned vertex will be from
+            the given source space. For most accuruate estimates, do not
+            restrict vertices.
         subjects_dir : str, or None
             Path to the SUBJECTS_DIR. If None, the path is obtained by using
             the environment variable SUBJECTS_DIR.
@@ -1057,7 +1047,7 @@ def _split_label_contig(label_to_split, subject=None, subjects_dir=None):
     for div, name, color in zip(label_divs, names, colors):
         # Get indices of dipoles within this division of the label
         verts = np.array(sorted(list(div)))
-        vert_indices = in1d(verts_arr, verts, assume_unique=True)
+        vert_indices = np.in1d(verts_arr, verts, assume_unique=True)
 
         # Set label attributes
         pos = label_to_split.pos[vert_indices]

@@ -182,6 +182,7 @@ FIFF.FIFFV_IAS_CH       = 910  # Internal Active Shielding data (maybe on Triux 
 FIFF.FIFFV_EXCI_CH      = 920  # flux excitation channel used to be a stimulus channel
 FIFF.FIFFV_DIPOLE_WAVE  = 1000  # Dipole time curve (xplotter/xfit)
 FIFF.FIFFV_GOODNESS_FIT = 1001  # Goodness of fit (xplotter/xfit)
+FIFF.FIFFV_FNIRS_CH     = 1100  # Functional near-infrared spectroscopy
 
 #
 # Quaternion channels for head position monitoring
@@ -500,7 +501,7 @@ FIFF.FIFF_MNE_EXTERNAL_LITTLE_ENDIAN = 3553     # Reference to an external binar
 # 3560... Miscellaneous
 #
 FIFF.FIFF_MNE_PROJ_ITEM_ACTIVE       = 3560     # Is this projection item active?
-FIFF.FIFF_MNE_EVENT_LIST             = 3561     # An event list (for STI 014)
+FIFF.FIFF_MNE_EVENT_LIST             = 3561     # An event list (for STI101 / STI 014)
 FIFF.FIFF_MNE_HEMI                   = 3562     # Hemisphere association for general purposes
 FIFF.FIFF_MNE_DATA_SKIP_NOP          = 3563     # A data skip turned off in the raw data
 FIFF.FIFF_MNE_ORIG_CH_INFO           = 3564     # Channel information before any changes
@@ -535,6 +536,10 @@ FIFF.FIFF_MNE_ICA_PCA_MEAN          = 3606     # PCA mean
 FIFF.FIFF_MNE_ICA_MATRIX            = 3607     # ICA unmixing matrix
 FIFF.FIFF_MNE_ICA_BADS              = 3608     # ICA bad sources
 FIFF.FIFF_MNE_ICA_MISC_PARAMS       = 3609     # ICA misc params
+#
+# Miscellaneous
+#
+FIFF.FIFF_MNE_KIT_SYSTEM_ID         = 3612     # Unique ID assigned to KIT systems
 #
 # Maxfilter tags
 #
@@ -634,30 +639,7 @@ FIFF.FIFFV_MNE_COORD_FS_TAL      = 2006         # FreeSurfer Talairach coordinat
 #
 FIFF.FIFFV_MNE_COORD_4D_HEAD     = FIFF.FIFFV_MNE_COORD_CTF_HEAD
 FIFF.FIFFV_MNE_COORD_KIT_HEAD    = FIFF.FIFFV_MNE_COORD_CTF_HEAD
-#
-# KIT system coil types
-#
-FIFF.FIFFV_COIL_KIT_GRAD         = 6001
-FIFF.FIFFV_COIL_KIT_REF_MAG      = 6002
-#
-# CTF coil and channel types
-#
-FIFF.FIFFV_COIL_CTF_GRAD             = 5001
-FIFF.FIFFV_COIL_CTF_REF_MAG          = 5002
-FIFF.FIFFV_COIL_CTF_REF_GRAD         = 5003
-FIFF.FIFFV_COIL_CTF_OFFDIAG_REF_GRAD = 5004
-#
-# Magnes reference sensors
-#
-FIFF.FIFFV_COIL_MAGNES_REF_MAG          = 4003
-FIFF.FIFFV_COIL_MAGNES_REF_GRAD         = 4004
-FIFF.FIFFV_COIL_MAGNES_OFFDIAG_REF_GRAD = 4005
-#
-# BabySQUID sensors
-#
-FIFF.FIFFV_COIL_BABY_GRAD               = 7001
-FIFF.FIFFV_COIL_BABY_MAG                = 7002
-FIFF.FIFFV_COIL_BABY_REF_MAG            = 7003
+
 #
 #   FWD Types
 #
@@ -793,6 +775,9 @@ FIFF.FIFFV_COIL_EEG_BIPOLAR           = 5  # Bipolar EEG lead
 FIFF.FIFFV_COIL_DIPOLE             = 200  # Time-varying dipole definition
 # The coil info contains dipole location (r0) and
 # direction (ex)
+FIFF.FIFFV_COIL_FNIRS_HBO               = 300  # fNIRS oxyhemoglobin
+FIFF.FIFFV_COIL_FNIRS_HBR               = 301  # fNIRS deoxyhemoglobin
+
 FIFF.FIFFV_COIL_MCG_42             = 1000  # For testing the MCG software
 
 FIFF.FIFFV_COIL_POINT_MAGNETOMETER   = 2000  # Simple point magnetometer
@@ -814,6 +799,30 @@ FIFF.FIFFV_COIL_MAGNES_GRAD        = 4002  # Magnes WH gradiometer
 FIFF.FIFFV_COIL_MAGNES_R_MAG       = 4003  # Magnes WH reference magnetometer
 FIFF.FIFFV_COIL_MAGNES_R_GRAD_DIA  = 4004  # Magnes WH reference diagonal gradioometer
 FIFF.FIFFV_COIL_MAGNES_R_GRAD_OFF  = 4005  # Magnes WH reference off-diagonal gradiometer
+#
+# Magnes reference sensors
+#
+FIFF.FIFFV_COIL_MAGNES_REF_MAG          = 4003
+FIFF.FIFFV_COIL_MAGNES_REF_GRAD         = 4004
+FIFF.FIFFV_COIL_MAGNES_OFFDIAG_REF_GRAD = 4005
+#
+# CTF coil and channel types
+#
+FIFF.FIFFV_COIL_CTF_GRAD             = 5001
+FIFF.FIFFV_COIL_CTF_REF_MAG          = 5002
+FIFF.FIFFV_COIL_CTF_REF_GRAD         = 5003
+FIFF.FIFFV_COIL_CTF_OFFDIAG_REF_GRAD = 5004
+#
+# KIT system coil types
+#
+FIFF.FIFFV_COIL_KIT_GRAD         = 6001
+FIFF.FIFFV_COIL_KIT_REF_MAG      = 6002
+#
+# BabySQUID sensors
+#
+FIFF.FIFFV_COIL_BABY_GRAD               = 7001
+FIFF.FIFFV_COIL_BABY_MAG                = 7002
+FIFF.FIFFV_COIL_BABY_REF_MAG            = 7003
 
 # MNE RealTime
 FIFF.FIFF_MNE_RT_COMMAND           = 3700  # realtime command

@@ -10,9 +10,9 @@ from numpy.testing import assert_array_equal, assert_array_almost_equal
 import mne
 from mne.datasets import testing
 from mne.beamformer import dics, dics_epochs, dics_source_power, tf_dics
-from mne.time_frequency import compute_epochs_csd
+from mne.time_frequency import csd_epochs
 from mne.externals.six import advance_iterator
-from mne.utils import run_tests_if_main, clean_warning_registry
+from mne.utils import run_tests_if_main
 
 # Note that this is the first test file, this will apply to all subsequent
 # tests in a full nosetest:
@@ -28,9 +28,6 @@ fname_event = op.join(data_path, 'MEG', 'sample',
                       'sample_audvis_trunc_raw-eve.fif')
 label = 'Aud-lh'
 fname_label = op.join(data_path, 'MEG', 'sample', 'labels', '%s.label' % label)
-
-# bit of a hack to deal with old scipy/numpy throwing warnings in tests
-clean_warning_registry()
 
 
 def read_forward_solution_meg(*args, **kwargs):
@@ -76,12 +73,12 @@ def _get_data(tmin=-0.11, tmax=0.15, read_all_forward=True, compute_csds=True):
 
     # Computing the data and noise cross-spectral density matrices
     if compute_csds:
-        data_csd = compute_epochs_csd(epochs, mode='multitaper', tmin=0.045,
-                                      tmax=None, fmin=8, fmax=12,
-                                      mt_bandwidth=72.72)
-        noise_csd = compute_epochs_csd(epochs, mode='multitaper', tmin=None,
-                                       tmax=0.0, fmin=8, fmax=12,
-                                       mt_bandwidth=72.72)
+        data_csd = csd_epochs(epochs, mode='multitaper', tmin=0.045,
+                              tmax=None, fmin=8, fmax=12,
+                              mt_bandwidth=72.72)
+        noise_csd = csd_epochs(epochs, mode='multitaper', tmin=None,
+                               tmax=0.0, fmin=8, fmax=12,
+                               mt_bandwidth=72.72)
     else:
         data_csd, noise_csd = None, None
 
@@ -240,10 +237,10 @@ def test_tf_dics():
 
     noise_csds = []
     for freq_bin, win_length in zip(freq_bins, win_lengths):
-        noise_csd = compute_epochs_csd(epochs, mode='fourier',
-                                       fmin=freq_bin[0], fmax=freq_bin[1],
-                                       fsum=True, tmin=tmin,
-                                       tmax=tmin + win_length)
+        noise_csd = csd_epochs(epochs, mode='fourier',
+                               fmin=freq_bin[0], fmax=freq_bin[1],
+                               fsum=True, tmin=tmin,
+                               tmax=tmin + win_length)
         noise_csds.append(noise_csd)
 
     stcs = tf_dics(epochs, forward, noise_csds, tmin, tmax, tstep, win_lengths,
@@ -257,14 +254,14 @@ def test_tf_dics():
     source_power = []
     time_windows = [(-0.1, 0.1), (0.0, 0.2)]
     for time_window in time_windows:
-        data_csd = compute_epochs_csd(epochs, mode='fourier',
-                                      fmin=freq_bins[0][0],
-                                      fmax=freq_bins[0][1], fsum=True,
-                                      tmin=time_window[0], tmax=time_window[1])
-        noise_csd = compute_epochs_csd(epochs, mode='fourier',
-                                       fmin=freq_bins[0][0],
-                                       fmax=freq_bins[0][1], fsum=True,
-                                       tmin=-0.2, tmax=0.0)
+        data_csd = csd_epochs(epochs, mode='fourier',
+                              fmin=freq_bins[0][0],
+                              fmax=freq_bins[0][1], fsum=True,
+                              tmin=time_window[0], tmax=time_window[1])
+        noise_csd = csd_epochs(epochs, mode='fourier',
+                               fmin=freq_bins[0][0],
+                               fmax=freq_bins[0][1], fsum=True,
+                               tmin=-0.2, tmax=0.0)
         data_csd.data /= data_csd.n_fft
         noise_csd.data /= noise_csd.n_fft
         stc_source_power = dics_source_power(epochs.info, forward, noise_csd,

@@ -171,6 +171,8 @@ class FieldTripClient(object):
                     this_info['kind'] = FIFF.FIFFV_ECG_CH
                 elif ch.startswith('MISC'):
                     this_info['kind'] = FIFF.FIFFV_MISC_CH
+                elif ch.startswith('SYS'):
+                    this_info['kind'] = FIFF.FIFFV_SYST_CH
 
                 # Fieldtrip already does calibration
                 this_info['range'] = 1.0
@@ -259,6 +261,8 @@ class FieldTripClient(object):
         info = self.info
         if picks is not None:
             info = pick_info(info, picks)
+        else:
+            picks = range(info['nchan'])
         epoch = EpochsArray(data[picks][np.newaxis], info, events)
 
         return epoch

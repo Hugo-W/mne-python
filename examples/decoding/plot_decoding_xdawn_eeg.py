@@ -34,7 +34,7 @@ from sklearn.preprocessing import MinMaxScaler
 from mne import io, pick_types, read_events, Epochs
 from mne.datasets import sample
 from mne.preprocessing import Xdawn
-from mne.decoding import EpochsVectorizer
+from mne.decoding import Vectorizer
 from mne.viz import tight_layout
 
 
@@ -51,7 +51,7 @@ event_id = dict(aud_l=1, aud_r=2, vis_l=3, vis_r=4)
 
 # Setup for reading the raw data
 raw = io.read_raw_fif(raw_fname, preload=True)
-raw.filter(1, 20, method='iir')
+raw.filter(1, 20)
 events = read_events(event_fname)
 
 picks = pick_types(raw.info, meg=False, eeg=True, stim=False, eog=False,
@@ -59,11 +59,11 @@ picks = pick_types(raw.info, meg=False, eeg=True, stim=False, eog=False,
 
 epochs = Epochs(raw, events, event_id, tmin, tmax, proj=False,
                 picks=picks, baseline=None, preload=True,
-                add_eeg_ref=False, verbose=False)
+                verbose=False)
 
 # Create classification pipeline
 clf = make_pipeline(Xdawn(n_components=3),
-                    EpochsVectorizer(),
+                    Vectorizer(),
                     MinMaxScaler(),
                     LogisticRegression(penalty='l1'))
 

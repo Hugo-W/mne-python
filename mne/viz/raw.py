@@ -132,13 +132,15 @@ def plot_raw(raw, events=None, duration=10.0, start=0.0, n_channels=20,
 
     remove_dc : bool
         If True remove DC component when plotting data.
-    order : 'type' | 'original' | 'selection' | 'position' | array of int
-        Order in which to plot data. 'type' groups by channel type,
-        'original' plots in the order of ch_names, 'selection' uses
-        Elekta's channel groupings (only works for Neuromag data) and
-        'positions' groups the channels by the positions of the sensors.
-        If array, the order is determined by the indices in the array.
-        Defaults to 'type'.
+    order : str | array of int
+        Order in which to plot data. 'type' groups by channel type, 'original'
+        plots in the order of ch_names, 'selection' uses Elekta's channel
+        groupings (only works for Neuromag data), 'position' groups the
+        channels by the positions of the sensors. 'selection' and 'position'
+        modes allow custom selections by using lasso selector on the topomap.
+        Pressing ``ctrl`` key while selecting allows appending to the current
+        selection. If array, only the channels in the array are plotted in the
+        given order. Defaults to 'type'.
     show_options : bool
         If True, a dialog for options related to projection is shown.
     title : str | None
@@ -249,9 +251,13 @@ def plot_raw(raw, events=None, duration=10.0, start=0.0, n_channels=20,
     for t in ['grad', 'mag']:
         inds += [pick_types(info, meg=t, ref_meg=False, exclude=[])]
         types += [t] * len(inds[-1])
+    for t in ['hbo', 'hbr']:
+        inds += [pick_types(info, meg=False, ref_meg=False, fnirs=t,
+                            exclude=[])]
+        types += [t] * len(inds[-1])
     pick_kwargs = dict(meg=False, ref_meg=False, exclude=[])
     for key in _PICK_TYPES_KEYS:
-        if key != 'meg':
+        if key not in ['meg', 'fnirs']:
             pick_kwargs[key] = True
             inds += [pick_types(raw.info, **pick_kwargs)]
             types += [key] * len(inds[-1])
@@ -295,13 +301,14 @@ def plot_raw(raw, events=None, duration=10.0, start=0.0, n_channels=20,
                   n_times=n_times, event_times=event_times, inds=inds,
                   event_nums=event_nums, clipping=clipping, fig_proj=None)
 
-    if isinstance(order, string_types) and order in ['selection', 'position']:
+    if order in ['selection', 'position']:
         params['fig_selection'] = fig_selection
         params['selections'] = selections
         params['radio_clicked'] = partial(_radio_clicked, params=params)
         fig_selection.radio.on_clicked(params['radio_clicked'])
-        pick_callback = partial(_region_picked, params=params)
-        fig_selection.canvas.mpl_connect('pick_event', pick_callback)
+        lasso_callback = partial(_set_custom_selection, params=params)
+        fig_selection.canvas.mpl_connect('lasso_event', lasso_callback)
+
     _prepare_mne_browse_raw(params, title, bgcolor, color, bad_color, inds,
                             n_channels)
 
@@ -575,6 +582,12 @@ def plot_raw_psd(raw, tmin=0., tmax=np.inf, fmin=0, fmax=np.inf, proj=False,
         # Convert PSDs to dB
         if dB:
             psds = 10 * np.log10(psds)
+            if np.any(np.isinf(psds)):
+                where = np.flatnonzero(np.isinf(psds.min(1)))
+                chs = [raw.ch_names[i] for i in picks[where]]
+                raise ValueError("Infinite value in PSD for channel(s) %s. "
+                                 "These channels might be dead." %
+                                 ', '.join(chs))
             unit = 'dB'
         else:
             unit = 'power'
@@ -894,18 +907,16 @@ def plot_raw_psd_topo(raw, tmin=0., tmax=None, fmin=0., fmax=100., proj=False,
     return fig
 
 
-def _region_picked(event, params):
-    """Callback for selecting a region by clicking the topomap."""
-    ind = event.ind[0]
-    for type in ('mag', 'grad', 'eeg', 'seeg'):
-        if type in params['types']:
-            types = np.where(np.array(params['types']) == type)[0]
-            break
+def _set_custom_selection(params):
+    """Callback for setting custom selection by lasso selector."""
+    chs = params['fig_selection'].lasso.selection
+    if len(chs) == 0:
+        return
     labels = [l._text for l in params['fig_selection'].radio.labels]
-    for idx, label in enumerate(labels):
-        if types[ind] in params['selections'][label]:
-            _set_radio_button(idx, params)
-            return
+    inds = np.in1d(params['raw'].ch_names, chs)
+    params['selections']['Custom'] = np.where(inds)[0]
+
+    _set_radio_button(labels.index('Custom'), params=params)
 
 
 def _setup_browser_selection(raw, kind):
@@ -915,7 +926,7 @@ def _setup_browser_selection(raw, kind):
     from ..selection import (read_selection, _SELECTIONS, _EEG_SELECTIONS,
                              _divide_to_regions)
     from ..utils import _get_stim_channel
-    if kind == 'position':
+    if kind in ('position'):
         order = _divide_to_regions(raw.info)
         keys = _SELECTIONS[1:]  # no 'Vertex'
     elif 'selection':
@@ -940,7 +951,7 @@ def _setup_browser_selection(raw, kind):
     misc = pick_types(raw.info, meg=False, eeg=False, stim=True, eog=True,
                       ecg=True, emg=True, ref_meg=False, misc=True, resp=True,
                       chpi=True, exci=True, ias=True, syst=True, seeg=False,
-                      bio=True, ecog=False, exclude=())
+                      bio=True, ecog=False, fnirs=False, exclude=())
     if len(misc) > 0:
         order['Misc'] = misc
     keys = np.concatenate([keys, ['Misc']])
@@ -948,7 +959,10 @@ def _setup_browser_selection(raw, kind):
     fig_selection.canvas.set_window_title('Selection')
     rax = plt.subplot2grid((6, 1), (2, 0), rowspan=4, colspan=1)
     topo_ax = plt.subplot2grid((6, 1), (0, 0), rowspan=2, colspan=1)
-    plot_sensors(raw.info, kind='topomap', ch_type=None, axes=topo_ax,
+    keys = np.concatenate([keys, ['Custom']])
+    order.update({'Custom': list()})  # custom selection with lasso
+
+    plot_sensors(raw.info, kind='select', ch_type='all', axes=topo_ax,
                  ch_groups=kind, title='', show=False)
     fig_selection.radio = RadioButtons(rax, [key for key in keys
                                              if key in order.keys()])

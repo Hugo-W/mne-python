@@ -12,7 +12,7 @@ from numpy.testing import assert_array_equal
 
 from mne import io, Epochs, read_events, pick_types
 from mne.utils import (requires_sklearn, requires_sklearn_0_15, slow_test,
-                       run_tests_if_main, check_version)
+                       run_tests_if_main, check_version, use_log_level)
 from mne.decoding import GeneralizationAcrossTime, TimeDecoding
 
 
@@ -28,7 +28,7 @@ warnings.simplefilter('always')
 
 
 def make_epochs():
-    raw = io.read_raw_fif(raw_fname, preload=False)
+    raw = io.read_raw_fif(raw_fname)
     events = read_events(event_name)
     picks = pick_types(raw.info, meg='mag', stim=False, ecg=False,
                        eog=False, exclude='bads')
@@ -59,13 +59,13 @@ def test_generalization_across_time():
     y_4classes = np.hstack((epochs.events[:7, 2], epochs.events[7:, 2] + 1))
     if check_version('sklearn', '0.18'):
         from sklearn.model_selection import (KFold, StratifiedKFold,
-                                             ShuffleSplit, LeaveOneLabelOut)
+                                             ShuffleSplit, LeaveOneGroupOut)
+        cv = LeaveOneGroupOut()
         cv_shuffle = ShuffleSplit()
-        cv = LeaveOneLabelOut()
         # XXX we cannot pass any other parameters than X and y to cv.split
         # so we have to build it before hand
         cv_lolo = [(train, test) for train, test in cv.split(
-                   X=y_4classes, y=y_4classes, labels=y_4classes)]
+                   y_4classes, y_4classes, y_4classes)]
 
         # With sklearn >= 0.17, `clf` can be identified as a regressor, and
         # the scoring metrics can therefore be automatically assigned.
@@ -152,7 +152,8 @@ def test_generalization_across_time():
     gat.predict_mode = 'mean-prediction'
     epochs2.events[:, 2] += 10
     gat_ = copy.deepcopy(gat)
-    assert_raises(ValueError, gat_.score, epochs2)
+    with use_log_level('error'):
+        assert_raises(ValueError, gat_.score, epochs2)
     gat.predict_mode = 'cross-validation'
 
     # Test basics
@@ -234,8 +235,6 @@ def test_generalization_across_time():
     assert_equal(np.shape(gat.scores_), (15, 1))
     assert_array_equal([tim for ttime in gat.test_times_['times']
                         for tim in ttime], gat.train_times_['times'])
-    from mne.utils import set_log_level
-    set_log_level('error')
     # Test generalization across conditions
     gat = GeneralizationAcrossTime(predict_mode='mean-prediction', cv=2)
     with warnings.catch_warnings(record=True):
@@ -249,7 +248,8 @@ def test_generalization_across_time():
     gat_ = copy.deepcopy(gat)
     # --- start stop outside time range
     gat_.train_times = dict(start=-999.)
-    assert_raises(ValueError, gat_.fit, epochs)
+    with use_log_level('error'):
+        assert_raises(ValueError, gat_.fit, epochs)
     gat_.train_times = dict(start=999.)
     assert_raises(ValueError, gat_.fit, epochs)
     # --- impossible slices
@@ -316,8 +316,9 @@ def test_generalization_across_time():
     # sklearn needs it: c.f.
     # https://github.com/scikit-learn/scikit-learn/issues/2723
     # and http://bit.ly/1u7t8UT
-    assert_raises(ValueError, gat.score, epochs2)
-    gat.score(epochs)
+    with use_log_level('error'):
+        assert_raises(ValueError, gat.score, epochs2)
+        gat.score(epochs)
     assert_true(0.0 <= np.min(scores) <= 1.0)
     assert_true(0.0 <= np.max(scores) <= 1.0)
 
@@ -409,7 +410,10 @@ def test_decoding_time():
     """Test TimeDecoding
     """
     from sklearn.svm import SVR
-    from sklearn.cross_validation import KFold
+    if check_version('sklearn', '0.18'):
+        from sklearn.model_selection import KFold
+    else:
+        from sklearn.cross_validation import KFold
     epochs = make_epochs()
     tg = TimeDecoding()
     assert_equal("<TimeDecoding | no fit, no prediction, no score>", '%s' % tg)

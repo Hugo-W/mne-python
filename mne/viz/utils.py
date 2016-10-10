@@ -17,6 +17,7 @@ import webbrowser
 import tempfile
 import numpy as np
 from copy import deepcopy
+from distutils.version import LooseVersion
 
 from ..channels.layout import _auto_topomap_coords
 from ..channels.channels import _contains_ch_type
@@ -25,7 +26,6 @@ from ..io import show_fiff, Info
 from ..io.pick import channel_type, channel_indices_by_type, pick_channels
 from ..utils import verbose, set_config, warn
 from ..externals.six import string_types
-from ..fixes import _get_argrelmax
 from ..selection import (read_selection, _SELECTIONS, _EEG_SELECTIONS,
                          _divide_to_regions)
 
@@ -107,6 +107,32 @@ def _check_delayed_ssp(container):
                            ' the data with proj set to False.')
     elif len(container.info['projs']) < 1:
         raise RuntimeError('No projs found in evoked.')
+
+
+def _validate_if_list_of_axes(axes, obligatory_len=None):
+    """ Helper function that validates whether input is a list/array of axes"""
+    import matplotlib as mpl
+    if obligatory_len is not None and not isinstance(obligatory_len, int):
+        raise ValueError('obligatory_len must be None or int, got %d',
+                         'instead' % type(obligatory_len))
+    if not isinstance(axes, (list, np.ndarray)):
+        raise ValueError('axes must be a list or numpy array of matplotlib '
+                         'axes objects, got %s instead.' % type(axes))
+    if isinstance(axes, np.ndarray) and axes.ndim > 1:
+        raise ValueError('if input is a numpy array, it must be '
+                         'one-dimensional. The received numpy array has %d '
+                         'dimensions however. Try using ravel or flatten '
+                         'method of the array.' % axes.ndim)
+    is_correct_type = np.array([isinstance(x, mpl.axes.Axes)
+                               for x in axes])
+    if not np.all(is_correct_type):
+        first_bad = np.where(np.logical_not(is_correct_type))[0][0]
+        raise ValueError('axes must be a list or numpy array of matplotlib '
+                         'axes objects while one of the list elements is '
+                         '%s.' % type(axes[first_bad]))
+    if obligatory_len is not None and not len(axes) == obligatory_len:
+        raise ValueError('axes must be a list/array of length %d, while the'
+                         ' length is %d' % (obligatory_len, len(axes)))
 
 
 def mne_analyze_colormap(limits=[5, 10, 15], format='mayavi'):
@@ -507,7 +533,7 @@ def figure_nobar(*args, **kwargs):
 def _helper_raw_resize(event, params):
     """Helper for resizing"""
     size = ','.join([str(s) for s in params['fig'].get_size_inches()])
-    set_config('MNE_BROWSE_RAW_SIZE', size)
+    set_config('MNE_BROWSE_RAW_SIZE', size, set_env=False)
     _layout_figure(params)
 
 
@@ -558,10 +584,11 @@ def _radio_clicked(label, params):
     params['fig_selection'].radio._active_idx = idx
     channels = params['selections'][label]
     ax_topo = params['fig_selection'].get_axes()[1]
-    for type in ('mag', 'grad', 'eeg', 'seeg'):
-        if type in params['types']:
-            types = np.where(np.array(params['types']) == type)[0]
-            break
+    types = np.array([], dtype=int)
+    for this_type in ('mag', 'grad', 'eeg', 'seeg', 'ecog', 'hbo', 'hbr'):
+        if this_type in params['types']:
+            types = np.concatenate(
+                [types, np.where(np.array(params['types']) == this_type)[0]])
     colors = np.zeros((len(types), 4))  # alpha = 0 by default
     locs3d = np.array([ch['loc'][:3] for ch in params['info']['chs']])
     x, y, z = locs3d.T
@@ -580,7 +607,8 @@ def _radio_clicked(label, params):
     for line in params['lines'][n_channels:]:  # To remove lines from view.
         line.set_xdata([])
         line.set_ydata([])
-    _setup_browser_offsets(params, n_channels)
+    if n_channels > 0:  # Can be 0 with lasso selector.
+        _setup_browser_offsets(params, n_channels)
     params['plot_fun']()
 
 
@@ -724,7 +752,7 @@ def _mouse_click(event, params):
 
 def _handle_topomap_bads(ch_name, params):
     """Helper for coloring channels in selection topomap when selecting bads"""
-    for type in ('mag', 'grad', 'eeg', 'seeg'):
+    for type in ('mag', 'grad', 'eeg', 'seeg', 'hbo', 'hbr'):
         if type in params['types']:
             types = np.where(np.array(params['types']) == type)[0]
             break
@@ -746,6 +774,8 @@ def _find_channel_idx(ch_name, params):
     offset = 0
     labels = [l._text for l in params['fig_selection'].radio.labels]
     for label in labels:
+        if label == 'Custom':
+            continue  # Custom selection not included as it shifts the indices.
         selection = params['selections'][label]
         hits = np.where(np.array(params['raw'].ch_names)[selection] == ch_name)
         for idx in hits[0]:
@@ -857,7 +887,7 @@ class ClickableImage(object):
 
     Parameters
     ----------
-    imdata: ndarray
+    imdata : ndarray
         The image that you wish to click on for 2-d points.
     **kwargs : dict
         Keyword arguments. Passed to ax.imshow.
@@ -889,7 +919,7 @@ class ClickableImage(object):
 
         Parameters
         ----------
-        event: matplotlib event object
+        event : matplotlib event object
             The matplotlib object that we use to get x/y position.
         """
         mouseevent = event.mouseevent
@@ -932,7 +962,7 @@ class ClickableImage(object):
         return lt
 
 
-def _fake_click(fig, ax, point, xform='ax', button=1):
+def _fake_click(fig, ax, point, xform='ax', button=1, kind='press'):
     """Helper to fake a click at a relative point within axes."""
     if xform == 'ax':
         x, y = ax.transAxes.transform_point(point)
@@ -940,10 +970,17 @@ def _fake_click(fig, ax, point, xform='ax', button=1):
         x, y = ax.transData.transform_point(point)
     else:
         raise ValueError('unknown transform')
+    if kind == 'press':
+        func = partial(fig.canvas.button_press_event, x=x, y=y, button=button)
+    elif kind == 'release':
+        func = partial(fig.canvas.button_release_event, x=x, y=y,
+                       button=button)
+    elif kind == 'motion':
+        func = partial(fig.canvas.motion_notify_event, x=x, y=y)
     try:
-        fig.canvas.button_press_event(x, y, button, False, None)
+        func(guiEvent=None)
     except Exception:  # for old MPL
-        fig.canvas.button_press_event(x, y, button, False)
+        func()
 
 
 def add_background_image(fig, im, set_ratios=None):
@@ -959,20 +996,19 @@ def add_background_image(fig, im, set_ratios=None):
 
     Parameters
     ----------
-    fig: plt.figure
+    fig : plt.figure
         The figure you wish to add a bg image to.
-    im: ndarray
-        A numpy array that works with a call to
-        plt.imshow(im). This will be plotted
-        as the background of the figure.
-    set_ratios: None | str
+    im : array, shape (M, N, {3, 4})
+        A background image for the figure. This must be a valid input to
+        `matplotlib.pyplot.imshow`. Defaults to None.
+    set_ratios : None | str
         Set the aspect ratio of any axes in fig
         to the value in set_ratios. Defaults to None,
         which does nothing to axes.
 
     Returns
     -------
-    ax_im: instance of the create matplotlib axis object
+    ax_im : instance of the created matplotlib axis object
         corresponding to the image you added.
 
     Notes
@@ -980,11 +1016,14 @@ def add_background_image(fig, im, set_ratios=None):
     .. versionadded:: 0.9.0
 
     """
+    if im is None:
+        # Don't do anything and return nothing
+        return None
     if set_ratios is not None:
         for ax in fig.axes:
             ax.set_aspect(set_ratios)
 
-    ax_im = fig.add_axes([0, 0, 1, 1])
+    ax_im = fig.add_axes([0, 0, 1, 1], label='background')
     ax_im.imshow(im, aspect='auto')
     ax_im.set_zorder(-1)
     return ax_im
@@ -994,7 +1033,7 @@ def _find_peaks(evoked, npeaks):
     """Helper function for finding peaks from evoked data
     Returns ``npeaks`` biggest peaks as a list of time points.
     """
-    argrelmax = _get_argrelmax()
+    from scipy.signal import argrelmax
     gfp = evoked.data.std(axis=0)
     order = len(evoked.times) // 30
     if order < 1:
@@ -1039,7 +1078,8 @@ def _process_times(inst, times, n_peaks=None, few=False):
 
 
 def plot_sensors(info, kind='topomap', ch_type=None, title=None,
-                 show_names=False, ch_groups=None, axes=None, show=True):
+                 show_names=False, ch_groups=None, axes=None, block=False,
+                 show=True):
     """Plot sensors positions.
 
     Parameters
@@ -1047,11 +1087,17 @@ def plot_sensors(info, kind='topomap', ch_type=None, title=None,
     info : Instance of Info
         Info structure containing the channel locations.
     kind : str
-        Whether to plot the sensors as 3d or as topomap. Available options
-        'topomap', '3d'. Defaults to 'topomap'.
-    ch_type : 'mag' | 'grad' | 'eeg' | 'seeg' | None
-        The channel type to plot. If None, then channels are chosen in the
-        order given above.
+        Whether to plot the sensors as 3d, topomap or as an interactive
+        sensor selection dialog. Available options 'topomap', '3d', 'select'.
+        If 'select', a set of channels can be selected interactively by using
+        lasso selector or clicking while holding control key. The selected
+        channels are returned along with the figure instance. Defaults to
+        'topomap'.
+    ch_type : None | str
+        The channel type to plot. Available options 'mag', 'grad', 'eeg',
+        'seeg', 'ecog', 'all'. If ``'all'``, all the available mag, grad, eeg,
+        seeg and ecog channels are plotted. If None (default), then channels
+        are chosen in the order given above.
     title : str | None
         Title for the figure. If None (default), equals to
         ``'Sensor positions (%s)' % ch_type``.
@@ -1071,6 +1117,12 @@ def plot_sensors(info, kind='topomap', ch_type=None, title=None,
 
         .. versionadded:: 0.13.0
 
+    block : bool
+        Whether to halt program execution until the figure is closed. Defaults
+        to False.
+
+        .. versionadded:: 0.13.0
+
     show : bool
         Show figure if True. Defaults to True.
 
@@ -1078,6 +1130,8 @@ def plot_sensors(info, kind='topomap', ch_type=None, title=None,
     -------
     fig : instance of matplotlib figure
         Figure containing the sensor topography.
+    selection : list
+        A list of selected channels. Only returned if ``kind=='select'``.
 
     See Also
     --------
@@ -1093,21 +1147,29 @@ def plot_sensors(info, kind='topomap', ch_type=None, title=None,
 
     """
     from .evoked import _rgb
-    if kind not in ['topomap', '3d']:
-        raise ValueError("Kind must be 'topomap' or '3d'.")
+    if kind not in ['topomap', '3d', 'select']:
+        raise ValueError("Kind must be 'topomap', '3d' or 'select'. Got %s." %
+                         kind)
     if not isinstance(info, Info):
         raise TypeError('info must be an instance of Info not %s' % type(info))
     ch_indices = channel_indices_by_type(info)
-    allowed_types = ['mag', 'grad', 'eeg', 'seeg']
+    allowed_types = ['mag', 'grad', 'eeg', 'seeg', 'ecog']
     if ch_type is None:
         for this_type in allowed_types:
             if _contains_ch_type(info, this_type):
                 ch_type = this_type
                 break
-    elif ch_type not in allowed_types:
+        picks = ch_indices[ch_type]
+    elif ch_type == 'all':
+        picks = list()
+        for this_type in allowed_types:
+            picks += ch_indices[this_type]
+    elif ch_type in allowed_types:
+        picks = ch_indices[ch_type]
+    else:
         raise ValueError("ch_type must be one of %s not %s!" % (allowed_types,
                                                                 ch_type))
-    picks = ch_indices[ch_type]
+
     if len(picks) == 0:
         raise ValueError('Could not find any channels of type %s.' % ch_type)
 
@@ -1151,19 +1213,29 @@ def plot_sensors(info, kind='topomap', ch_type=None, title=None,
                 if pick in value:
                     colors[pick_idx] = color_vals[ind]
                     break
-    if kind == 'topomap':
+    if kind in ('topomap', 'select'):
         pos = _auto_topomap_coords(info, picks, True)
 
     title = 'Sensor positions (%s)' % ch_type if title is None else title
     fig = _plot_sensors(pos, colors, bads, ch_names, title, show_names, axes,
-                        show)
+                        show, kind == 'select', block=block)
+    if kind == 'select':
+        return fig, fig.lasso.selection
     return fig
 
 
-def _onpick_sensor(event, fig, ax, pos, ch_names):
+def _onpick_sensor(event, fig, ax, pos, ch_names, show_names):
     """Callback for picked channel in plot_sensors."""
+    if event.mouseevent.key == 'control' and fig.lasso is not None:
+        for ind in event.ind:
+            fig.lasso.select_one(ind)
+
+        return
+    if show_names:
+        return  # channel names already visible
     ind = event.ind[0]  # Just take the first sensor.
     ch_name = ch_names[ind]
+
     this_pos = pos[ind]
 
     # XXX: Bug in matplotlib won't allow setting the position of existing
@@ -1176,7 +1248,12 @@ def _onpick_sensor(event, fig, ax, pos, ch_names):
     fig.canvas.draw()
 
 
-def _plot_sensors(pos, colors, bads, ch_names, title, show_names, ax, show):
+def _close_event(event, fig):
+    fig.lasso.disconnect()
+
+
+def _plot_sensors(pos, colors, bads, ch_names, title, show_names, ax, show,
+                  select, block):
     """Helper function for plotting sensors."""
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d import Axes3D
@@ -1197,6 +1274,7 @@ def _plot_sensors(pos, colors, bads, ch_names, title, show_names, ax, show):
         ax.text(0, 0, 0, '', zorder=1)
         ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], picker=True, c=colors,
                    s=75, edgecolor=edgecolors, linewidth=2)
+
         ax.azim = 90
         ax.elev = 0
     else:
@@ -1207,9 +1285,13 @@ def _plot_sensors(pos, colors, bads, ch_names, title, show_names, ax, show):
                             hspace=None)
         pos, outlines = _check_outlines(pos, 'head')
         _draw_outlines(ax, outlines)
-        ax.scatter(pos[:, 0], pos[:, 1], picker=True, c=colors, s=75,
-                   edgecolor=edgecolors, linewidth=2)
 
+        pts = ax.scatter(pos[:, 0], pos[:, 1], picker=True, c=colors, s=75,
+                         edgecolor=edgecolors, linewidth=2)
+        if select:
+            fig.lasso = SelectFromCollection(ax, pts, ch_names)
+
+    connect_picker = True
     if show_names:
         for idx in range(len(pos)):
             this_pos = pos[idx]
@@ -1217,13 +1299,16 @@ def _plot_sensors(pos, colors, bads, ch_names, title, show_names, ax, show):
                 ax.text(this_pos[0], this_pos[1], this_pos[2], ch_names[idx])
             else:
                 ax.text(this_pos[0], this_pos[1], ch_names[idx])
-    else:
+        connect_picker = select
+    if connect_picker:
         picker = partial(_onpick_sensor, fig=fig, ax=ax, pos=pos,
-                         ch_names=ch_names)
+                         ch_names=ch_names, show_names=show_names)
         fig.canvas.mpl_connect('pick_event', picker)
 
     fig.suptitle(title)
-    plt_show(show)
+    closed = partial(_close_event, fig=fig)
+    fig.canvas.mpl_connect('close_event', closed)
+    plt_show(show, block=block)
     return fig
 
 
@@ -1297,3 +1382,192 @@ def _compute_scalings(scalings, inst):
         scale_factor = np.max(np.abs(scale_factor))
         scalings[key] = scale_factor
     return scalings
+
+
+class DraggableColorbar(object):
+    """Class for enabling interactive colorbar.
+    See http://www.ster.kuleuven.be/~pieterd/python/html/plotting/interactive_colorbar.html
+    """  # noqa
+    def __init__(self, cbar, mappable):
+        import matplotlib.pyplot as plt
+        self.cbar = cbar
+        self.mappable = mappable
+        self.press = None
+        self.cycle = sorted([i for i in dir(plt.cm) if
+                             hasattr(getattr(plt.cm, i), 'N')])
+        self.index = self.cycle.index(cbar.get_cmap().name)
+        self.lims = (self.cbar.norm.vmin, self.cbar.norm.vmax)
+        self.connect()
+
+    def connect(self):
+        """Connect to all the events we need."""
+        self.cidpress = self.cbar.patch.figure.canvas.mpl_connect(
+            'button_press_event', self.on_press)
+        self.cidrelease = self.cbar.patch.figure.canvas.mpl_connect(
+            'button_release_event', self.on_release)
+        self.cidmotion = self.cbar.patch.figure.canvas.mpl_connect(
+            'motion_notify_event', self.on_motion)
+        self.keypress = self.cbar.patch.figure.canvas.mpl_connect(
+            'key_press_event', self.key_press)
+        self.scroll = self.cbar.patch.figure.canvas.mpl_connect(
+            'scroll_event', self.on_scroll)
+
+    def on_press(self, event):
+        """Callback for button press."""
+        if event.inaxes != self.cbar.ax:
+            return
+        self.press = event.y
+
+    def key_press(self, event):
+        """Callback for key press."""
+        if event.key == 'down':
+            self.index += 1
+        elif event.key == 'up':
+            self.index -= 1
+        elif event.key == ' ':  # space key resets scale
+            self.cbar.norm.vmin = self.lims[0]
+            self.cbar.norm.vmax = self.lims[1]
+        else:
+            return
+        if self.index < 0:
+            self.index = len(self.cycle) - 1
+        elif self.index >= len(self.cycle):
+            self.index = 0
+        cmap = self.cycle[self.index]
+        self.cbar.set_cmap(cmap)
+        self.cbar.draw_all()
+        self.mappable.set_cmap(cmap)
+        self.cbar.patch.figure.canvas.draw()
+
+    def on_motion(self, event):
+        """Callback for mouse movements."""
+        if self.press is None:
+            return
+        if event.inaxes != self.cbar.ax:
+            return
+        yprev = self.press
+        dy = event.y - yprev
+        self.press = event.y
+        scale = self.cbar.norm.vmax - self.cbar.norm.vmin
+        perc = 0.03
+        if event.button == 1:
+            self.cbar.norm.vmin -= (perc * scale) * np.sign(dy)
+            self.cbar.norm.vmax -= (perc * scale) * np.sign(dy)
+        elif event.button == 3:
+            self.cbar.norm.vmin -= (perc * scale) * np.sign(dy)
+            self.cbar.norm.vmax += (perc * scale) * np.sign(dy)
+        self.cbar.draw_all()
+        self.mappable.set_norm(self.cbar.norm)
+        self.cbar.patch.figure.canvas.draw()
+
+    def on_release(self, event):
+        """Callback for release."""
+        self.press = None
+        self.mappable.set_norm(self.cbar.norm)
+        self.cbar.patch.figure.canvas.draw()
+
+    def on_scroll(self, event):
+        """Callback for scroll."""
+        scale = 1.1 if event.step < 0 else 1. / 1.1
+        self.cbar.norm.vmin *= scale
+        self.cbar.norm.vmax *= scale
+        self.cbar.draw_all()
+        self.mappable.set_norm(self.cbar.norm)
+        self.cbar.patch.figure.canvas.draw()
+
+
+class SelectFromCollection(object):
+    """Select channels from a matplotlib collection using `LassoSelector`.
+
+    Selected channels are saved in the ``selection`` attribute. This tool
+    highlights selected points by fading other points out (i.e., reducing their
+    alpha values).
+
+    Notes:
+    This tool selects collection objects based on their *origins*
+    (i.e., `offsets`). Emits mpl event 'lasso_event' when selection is ready.
+
+    Parameters
+    ----------
+    ax : Instance of Axes
+        Axes to interact with.
+
+    collection : Instance of matplotlib collection
+        Collection you want to select from.
+
+    alpha_other : 0 <= float <= 1
+        To highlight a selection, this tool sets all selected points to an
+        alpha value of 1 and non-selected points to `alpha_other`.
+        Defaults to 0.3.
+    """
+
+    def __init__(self, ax, collection, ch_names, alpha_other=0.3):
+        import matplotlib as mpl
+        if LooseVersion(mpl.__version__) < LooseVersion('1.2.1'):
+            raise ImportError('Interactive selection not possible for '
+                              'matplotlib versions < 1.2.1. Upgrade '
+                              'matplotlib.')
+        from matplotlib.widgets import LassoSelector
+        self.canvas = ax.figure.canvas
+        self.collection = collection
+        self.ch_names = ch_names
+        self.alpha_other = alpha_other
+
+        self.xys = collection.get_offsets()
+        self.Npts = len(self.xys)
+
+        # Ensure that we have separate colors for each object
+        self.fc = collection.get_facecolors()
+        if len(self.fc) == 0:
+            raise ValueError('Collection must have a facecolor')
+        elif len(self.fc) == 1:
+            self.fc = np.tile(self.fc, self.Npts).reshape(self.Npts, -1)
+        self.fc[:, -1] = self.alpha_other  # deselect in the beginning
+
+        self.lasso = LassoSelector(ax, onselect=self.on_select,
+                                   lineprops={'color': 'red', 'linewidth': .5})
+        self.selection = list()
+
+    def on_select(self, verts):
+        """Callback for selecting a subset from the collection."""
+        from matplotlib.path import Path
+        if len(verts) <= 3:  # Seems to be a good way to exclude single clicks.
+            return
+
+        path = Path(verts)
+        inds = np.nonzero([path.contains_point(xy) for xy in self.xys])[0]
+        if self.canvas._key == 'control':  # Appending selection.
+            sels = [np.where(self.ch_names == c)[0][0] for c in self.selection]
+            inters = set(inds) - set(sels)
+            inds = list(inters.union(set(sels) - set(inds)))
+
+        while len(self.selection) > 0:
+            self.selection.pop(0)
+        self.selection.extend(self.ch_names[inds])
+        self.fc[:, -1] = self.alpha_other
+        self.fc[inds, -1] = 1
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
+        self.canvas.callbacks.process('lasso_event')
+
+    def select_one(self, ind):
+        """Helper for selecting/deselecting one sensor."""
+        ch_name = self.ch_names[ind]
+        if ch_name in self.selection:
+            sel_ind = self.selection.index(ch_name)
+            self.selection.pop(sel_ind)
+            this_alpha = self.alpha_other
+        else:
+            self.selection.append(ch_name)
+            this_alpha = 1
+        self.fc[ind, -1] = this_alpha
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
+        self.canvas.callbacks.process('lasso_event')
+
+    def disconnect(self):
+        """Method for disconnecting the lasso selector."""
+        self.lasso.disconnect_events()
+        self.fc[:, -1] = 1
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()

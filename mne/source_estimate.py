@@ -12,7 +12,7 @@ import warnings
 
 import numpy as np
 from scipy import linalg, sparse
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, block_diag as sparse_block_diag
 
 from .filter import resample
 from .evoked import _get_peak
@@ -22,9 +22,8 @@ from .surface import (read_surface, _get_ico_surface, read_morph_map,
 from .source_space import (_ensure_src, _get_morph_src_reordering,
                            _ensure_src_subject, SourceSpaces)
 from .utils import (get_subjects_dir, _check_subject, logger, verbose,
-                    _time_mask, warn as warn_)
+                    _time_mask, warn as warn_, copy_function_doc_to_method_doc)
 from .viz import plot_source_estimates
-from .fixes import in1d, sparse_block_diag
 from .io.base import ToDataFrameMixin, TimeMixin
 
 from .externals.six import string_types
@@ -743,8 +742,8 @@ class _BaseSourceEstimate(ToDataFrameMixin, TimeMixin):
         ----------
         func : callable
             The transform to be applied, including parameters (see, e.g.,
-            `mne.fixes.partial`). The first parameter of the function is the
-            input data. The first return value is the transformed data,
+            :func:`functools.partial`). The first parameter of the function is
+            the input data. The first return value is the transformed data,
             remaining outputs are ignored. The first dimension of the
             transformed data has to be the same as the first dimension of the
             input data.
@@ -819,8 +818,8 @@ class _BaseSourceEstimate(ToDataFrameMixin, TimeMixin):
         ----------
         func : callable
             The transform to be applied, including parameters (see, e.g.,
-            mne.fixes.partial). The first parameter of the function is the
-            input data. The first two dimensions of the transformed data
+            :func:`functools.partial`). The first parameter of the function is
+            the input data. The first two dimensions of the transformed data
             should be (i) vertices and (ii) time.  Transforms which yield 3D
             output (e.g. time-frequency transforms) are valid, so long as the
             first two dimensions are vertices and time.  In this case, the
@@ -914,6 +913,9 @@ class _BaseSourceEstimate(ToDataFrameMixin, TimeMixin):
 def _center_of_mass(vertices, values, hemi, surf, subject, subjects_dir,
                     restrict_vertices):
     """Helper to find the center of mass on a surface"""
+    if (values == 0).all() or (values < 0).any():
+        raise ValueError('All values must be non-negative and at least one '
+                         'must be non-zero, cannot compute COM')
     subjects_dir = get_subjects_dir(subjects_dir, raise_error=True)
     surf = read_surface(op.join(subjects_dir, subject, 'surf',
                                 hemi + '.' + surf))
@@ -1066,7 +1068,7 @@ class SourceEstimate(_BaseSourceEstimate):
             stc_vertices = self.vertices[1]
 
         # find index of the Label's vertices
-        idx = np.nonzero(in1d(stc_vertices, label.vertices))[0]
+        idx = np.nonzero(np.in1d(stc_vertices, label.vertices))[0]
 
         # find output vertices
         vertices = stc_vertices[idx]
@@ -1308,91 +1310,27 @@ class SourceEstimate(_BaseSourceEstimate):
         t = self.tmin + self.tstep * t_ind
         return vertex, hemi, t
 
+    @copy_function_doc_to_method_doc(plot_source_estimates)
     def plot(self, subject=None, surface='inflated', hemi='lh',
-             colormap='auto', time_label='time=%0.2f ms',
+             colormap='auto', time_label='auto',
              smoothing_steps=10, transparent=None, alpha=1.0,
-             time_viewer=False, config_opts=None, subjects_dir=None,
-             figure=None, views='lat', colorbar=True, clim='auto'):
-        """Plot SourceEstimates with PySurfer
-
-        Note: PySurfer currently needs the SUBJECTS_DIR environment variable,
-        which will automatically be set by this function. Plotting multiple
-        SourceEstimates with different values for subjects_dir will cause
-        PySurfer to use the wrong FreeSurfer surfaces when using methods of
-        the returned Brain object. It is therefore recommended to set the
-        SUBJECTS_DIR environment variable or always use the same value for
-        subjects_dir (within the same Python session).
-
-        Parameters
-        ----------
-        subject : str | None
-            The subject name corresponding to FreeSurfer environment
-            variable SUBJECT. If None stc.subject will be used. If that
-            is None, the environment will be used.
-        surface : str
-            The type of surface (inflated, white etc.).
-        hemi : str, 'lh' | 'rh' | 'split' | 'both'
-            The hemisphere to display.
-        colormap : str | np.ndarray of float, shape(n_colors, 3 | 4)
-            Name of colormap to use or a custom look up table. If array, must
-            be (n x 3) or (n x 4) array for with RGB or RGBA values between
-            0 and 255. If 'auto', either 'hot' or 'mne' will be chosen
-            based on whether 'lims' or 'pos_lims' are specified in `clim`.
-        time_label : str
-            How to print info about the time instant visualized.
-        smoothing_steps : int
-            The amount of smoothing.
-        transparent : bool | None
-            If True, use a linear transparency between fmin and fmid.
-            None will choose automatically based on colormap type.
-        alpha : float
-            Alpha value to apply globally to the overlay.
-        time_viewer : bool
-            Display time viewer GUI.
-        config_opts : dict
-            Keyword arguments for Brain initialization.
-            See pysurfer.viz.Brain.
-        subjects_dir : str
-            The path to the FreeSurfer subjects reconstructions.
-            It corresponds to FreeSurfer environment variable SUBJECTS_DIR.
-        figure : instance of mayavi.core.scene.Scene | None
-            If None, the last figure will be cleaned and a new figure will
-            be created.
-        views : str | list
-            View to use. See surfer.Brain().
-        colorbar : bool
-            If True, display colorbar on scene.
-        clim : str | dict
-            Colorbar properties specification. If 'auto', set clim
-            automatically based on data percentiles. If dict, should contain:
-
-                kind : str
-                    Flag to specify type of limits. 'value' or 'percent'.
-                lims : list | np.ndarray | tuple of float, 3 elements
-                    Note: Only use this if 'colormap' is not 'mne'.
-                    Left, middle, and right bound for colormap.
-                pos_lims : list | np.ndarray | tuple of float, 3 elements
-                    Note: Only use this if 'colormap' is 'mne'.
-                    Left, middle, and right bound for colormap. Positive values
-                    will be mirrored directly across zero during colormap
-                    construction to obtain negative control points.
-
-
-        Returns
-        -------
-        brain : Brain
-            A instance of surfer.viz.Brain from PySurfer.
-        """
+             time_viewer=False, subjects_dir=None,
+             figure=None, views='lat', colorbar=True, clim='auto',
+             cortex="classic", size=800, background="black",
+             foreground="white", initial_time=None, time_unit='s'):
         brain = plot_source_estimates(self, subject, surface=surface,
                                       hemi=hemi, colormap=colormap,
                                       time_label=time_label,
                                       smoothing_steps=smoothing_steps,
                                       transparent=transparent, alpha=alpha,
                                       time_viewer=time_viewer,
-                                      config_opts=config_opts,
                                       subjects_dir=subjects_dir, figure=figure,
                                       views=views, colorbar=colorbar,
-                                      clim=clim)
+                                      clim=clim, cortex=cortex, size=size,
+                                      background=background,
+                                      foreground=foreground,
+                                      initial_time=initial_time,
+                                      time_unit=time_unit)
         return brain
 
     @verbose
@@ -1803,7 +1741,7 @@ class MixedSourceEstimate(_BaseSourceEstimate):
                      colormap='auto', time_label='time=%02.f ms',
                      smoothing_steps=10,
                      transparent=None, alpha=1.0, time_viewer=False,
-                     config_opts={}, subjects_dir=None, figure=None,
+                     config_opts=None, subjects_dir=None, figure=None,
                      views='lat', colorbar=True, clim='auto'):
         """Plot surface source estimates with PySurfer
 
@@ -2241,7 +2179,7 @@ def grade_to_vertices(subject, grade, subjects_dir=None, n_jobs=1,
     ----------
     subject : str
         Name of the subject
-    grade : int
+    grade : int | list
         Resolution of the icosahedral mesh (typically 5). If None, all
         vertices will be used (potentially filling the surface). If a list,
         then values will be morphed to the set of vertices specified in
@@ -2293,6 +2231,14 @@ def grade_to_vertices(subject, grade, subjects_dir=None, n_jobs=1,
                                 for xhs in [lhs, rhs])
             # Make sure the vertices are ordered
             vertices = [np.sort(verts) for verts in vertices]
+            for verts in vertices:
+                if (np.diff(verts) == 0).any():
+                    raise ValueError(
+                        'Cannot use icosahedral grade %s with subject %s, '
+                        'mapping %s vertices onto the high-resolution mesh '
+                        'yields repeated vertices, use a lower grade or a '
+                        'list of vertices from an existing source space'
+                        % (grade, subject, len(verts)))
     else:  # potentially fill the surface
         vertices = [np.arange(lhs.shape[0]), np.arange(rhs.shape[0])]
 
@@ -2380,7 +2326,7 @@ def spatio_temporal_src_connectivity(src, n_times, dist=None, verbose=None):
         connectivity = spatio_temporal_tris_connectivity(tris, n_times)
 
         # deal with source space only using a subset of vertices
-        masks = [in1d(u, s['vertno']) for s, u in zip(src, used_verts)]
+        masks = [np.in1d(u, s['vertno']) for s, u in zip(src, used_verts)]
         if sum(u.size for u in used_verts) != connectivity.shape[0] / n_times:
             raise ValueError('Used vertices do not match connectivity shape')
         if [np.sum(m) for m in masks] != [len(s['vertno']) for s in src]:

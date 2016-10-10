@@ -105,15 +105,6 @@ class ProjMixin(object):
                                              check_active=False, sort=False)
         return self
 
-    def add_eeg_average_proj(self):
-        """Add an average EEG reference projector if one does not exist
-        """
-        if _needs_eeg_average_ref_proj(self.info):
-            # Don't set as active, since we haven't applied it
-            eeg_proj = make_eeg_average_ref_proj(self.info, activate=False)
-            self.add_proj(eeg_proj)
-        return self
-
     def apply_proj(self):
         """Apply the signal space projection (SSP) operators to the data.
 
@@ -696,12 +687,17 @@ def make_eeg_average_ref_proj(info, activate=True, verbose=None):
     return eeg_proj
 
 
-def _has_eeg_average_ref_proj(projs):
-    """Determine if a list of projectors has an average EEG ref"""
+def _has_eeg_average_ref_proj(projs, check_active=False):
+    """Determine if a list of projectors has an average EEG ref
+
+    Optionally, set check_active=True to additionally check if the CAR
+    has already been applied.
+    """
     for proj in projs:
         if (proj['desc'] == 'Average EEG reference' or
                 proj['kind'] == FIFF.FIFFV_MNE_PROJ_ITEM_EEG_AVREF):
-            return True
+            if not check_active or proj['active']:
+                return True
     return False
 
 

@@ -17,7 +17,7 @@
 # Dev branch marker is: 'X.Y.devN' where N is an integer.
 #
 
-__version__ = '0.13.dev0'
+__version__ = '0.14.git'
 
 # have to import verbose first since it's needed by many things
 from .utils import (set_log_level, set_log_file, verbose, set_config,
@@ -32,6 +32,8 @@ from .io.meas_info import create_info, Info
 from .io.proj import Projection
 from .io.kit import read_epochs_kit
 from .io.eeglab import read_epochs_eeglab
+from .io.reference import (set_eeg_reference, set_bipolar_reference,
+                           add_reference_channels)
 from .bem import (make_sphere_model, make_bem_model, make_bem_solution,
                   read_bem_surfaces, write_bem_surfaces,
                   read_bem_solution, write_bem_solution)
@@ -39,9 +41,9 @@ from .cov import (read_cov, write_cov, Covariance, compute_raw_covariance,
                   compute_covariance, whiten_evoked, make_ad_hoc_cov)
 from .event import (read_events, write_events, find_events, merge_events,
                     pick_events, make_fixed_length_events, concatenate_events,
-                    find_stim_steps)
+                    find_stim_steps, AcqParserFIF)
 from .forward import (read_forward_solution, apply_forward, apply_forward_raw,
-                      average_forward_solutions,
+                      average_forward_solutions, Forward,
                       write_forward_solution, make_forward_solution,
                       convert_forward_solution, make_field_map,
                       make_forward_dipole)
@@ -57,7 +59,7 @@ from .source_estimate import (read_source_estimate, MixedSourceEstimate,
                               spatio_temporal_tris_connectivity,
                               spatio_temporal_dist_connectivity,
                               save_stc_as_volume, extract_label_time_course)
-from .surface import (read_surface, write_surface, decimate_surface,
+from .surface import (read_surface, write_surface, decimate_surface, read_tri,
                       read_morph_map, get_head_surf, get_meg_helmet_surf)
 from .source_space import (read_source_spaces, vertex_to_mni,
                            write_source_spaces, setup_source_space,
